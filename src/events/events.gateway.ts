@@ -1,4 +1,3 @@
-// src/events/events.gateway.ts
 import {
   WebSocketGateway,
   WebSocketServer,
@@ -39,6 +38,13 @@ export class EventsGateway implements OnGatewayConnection, OnGatewayDisconnect {
         if (participants.size === 0) {
           this.rooms.delete(roomId);
           this.logger.log(`Room ${roomId} deleted as it became empty`);
+        } else {
+          // Notify remaining participants about the disconnection
+          participants.forEach((peerId) => {
+            this.server
+              .to(peerId)
+              .emit('peer-disconnected', { peerId: clientId });
+          });
         }
       }
     });
@@ -62,12 +68,19 @@ export class EventsGateway implements OnGatewayConnection, OnGatewayDisconnect {
       this.rooms.set(roomId, participants);
 
       this.logger.log(`Client ${client.id} joined room ${roomId}`);
+      this.logger.log(
+        `Room ${roomId} now has ${participants.size} participants`,
+      );
       client.emit('room-joined', { success: true, roomId });
 
       // Notify other participants about new user
-      if (participants.size > 1) {
-        client.to(roomId).emit('new-peer', { peerId: client.id });
-      }
+      participants.forEach((peerId) => {
+        if (peerId !== client.id) {
+          this.server.to(peerId).emit('new-peer', { peerId: client.id });
+          // Also notify the new client about existing peers
+          client.emit('new-peer', { peerId });
+        }
+      });
     } catch (error) {
       this.logger.error(`Join room error: ${error.message}`);
       client.emit('room-error', { error: error.message });
@@ -87,10 +100,13 @@ export class EventsGateway implements OnGatewayConnection, OnGatewayDisconnect {
       if (!this.validateRoomParticipant(client.id, payload.roomId)) {
         throw new Error('Not a room participant');
       }
-      client.to(payload.targetPeerId).emit('offer', {
+      this.server.to(payload.targetPeerId).emit('offer', {
         offer: payload.offer,
         senderId: client.id,
       });
+      this.logger.log(
+        `Offer sent from ${client.id} to ${payload.targetPeerId}`,
+      );
     } catch (error) {
       this.logger.error(`Offer error: ${error.message}`);
       client.emit('signaling-error', { error: error.message });
@@ -110,10 +126,13 @@ export class EventsGateway implements OnGatewayConnection, OnGatewayDisconnect {
       if (!this.validateRoomParticipant(client.id, payload.roomId)) {
         throw new Error('Not a room participant');
       }
-      client.to(payload.targetPeerId).emit('answer', {
+      this.server.to(payload.targetPeerId).emit('answer', {
         answer: payload.answer,
         senderId: client.id,
       });
+      this.logger.log(
+        `Answer sent from ${client.id} to ${payload.targetPeerId}`,
+      );
     } catch (error) {
       this.logger.error(`Answer error: ${error.message}`);
       client.emit('signaling-error', { error: error.message });
@@ -133,10 +152,13 @@ export class EventsGateway implements OnGatewayConnection, OnGatewayDisconnect {
       if (!this.validateRoomParticipant(client.id, payload.roomId)) {
         throw new Error('Not a room participant');
       }
-      client.to(payload.targetPeerId).emit('ice-candidate', {
+      this.server.to(payload.targetPeerId).emit('ice-candidate', {
         candidate: payload.candidate,
         senderId: client.id,
       });
+      this.logger.log(
+        `ICE candidate sent from ${client.id} to ${payload.targetPeerId}`,
+      );
     } catch (error) {
       this.logger.error(`ICE candidate error: ${error.message}`);
       client.emit('signaling-error', { error: error.message });
